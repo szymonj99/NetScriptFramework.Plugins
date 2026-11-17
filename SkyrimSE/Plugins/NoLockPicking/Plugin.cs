@@ -361,7 +361,7 @@ namespace NoLockPicking
                     {
                         Memory.WriteZero(alloc.Address, 0x10);
                         Memory.WriteFloat(alloc.Address, 1.0f);
-                        Memory.InvokeCdecl(this.Addr_ApplyPerk_Func.Value, (int)PerkEntryPoints.Modify_Lockpick_Sweet_Spot, plrPtr, objPtr, alloc.Address);
+                        Memory.InvokeCdecl(this.Addr_ApplyPerk_Func.Value, (int)PerkEntryPoints.ModLockpickSweetSpot, plrPtr, objPtr, alloc.Address);
                         mySkillMult = Memory.ReadFloat(alloc.Address);
                     }
                 }
