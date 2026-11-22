@@ -842,7 +842,8 @@ namespace IFPV
             
             this.LastSkeletonParameter = (showFirst ? 1 : 0) + (showThird ? 2 : 0) + (wantThirdPersonMode ? 4 : 0);
 
-            bool isThirdPersonMode = (Memory.ReadUInt8(plr.Address + 0xBDB) & 1) != 0;
+            int skeletonModeOffset = this.Plugin.UsesModernCameraLayout ? 0xBEB : 0xBDB;
+            bool isThirdPersonMode = (Memory.ReadUInt8(plr.Address + skeletonModeOffset) & 1) != 0;
             bool isFirst = (Utility.GetNiAVFlags(fpSkeleton) & 1) == 0;
             bool isThird = (Utility.GetNiAVFlags(tpSkeleton) & 1) == 0;
 

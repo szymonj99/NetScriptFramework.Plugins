@@ -131,6 +131,12 @@ namespace IFPV
             private set;
         }
 
+        internal bool UsesModernCameraLayout
+        {
+            get;
+            private set;
+        }
+
         internal IntPtr SwitchSkeleton
         {
             get;
@@ -156,13 +162,14 @@ namespace IFPV
 
             this.Settings = new Settings();
             this.Settings.Load();
+            this.UsesModernCameraLayout = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
 
             this.PlayerControls_IsCamSwitchControlsEnabled = this.PrepareFunction("player camera switch controls check", 41263, 0);
             this.NiNode_ctor = this.PrepareFunction("ninode ctor", 68936, 0);
-            this.MagicNodeArt1 = this.PrepareFunction("magic node art 1", 33403, 0x6F);
-            this.MagicNodeArt2 = this.PrepareFunction("magic node art 2", 33391, 0x64);
-            this.MagicNodeArt3 = this.PrepareFunction("magic node art 3", 33375, 0xF5);
-            this.MagicNodeArt4 = this.PrepareFunction("magic node art 4", 33683, 0x63);
+            this.MagicNodeArt1 = this.PrepareEffectNodeReturn(33403, 0x6F, 0x71);
+            this.MagicNodeArt2 = this.PrepareEffectNodeReturn(33391, 0x64, 0x64);
+            this.MagicNodeArt3 = this.PrepareEffectNodeReturn(33375, 0xF5, 0x60);
+            this.MagicNodeArt4 = this.PrepareEffectNodeReturn(33683, 0x63, 0x64);
             this.ActorTurnX = this.PrepareFunction("actor turn x", 36603, 0);
             this.ActorTurnZ = this.PrepareFunction("actor turn z", 36250, 0);
             this.SwitchSkeleton = this.PrepareFunction("switch skeleton", 39401, 0);
@@ -170,13 +177,13 @@ namespace IFPV
 
             if(this.Settings.AllowLookDownAlot)
             {
-                var allowLookDownMore = NetScriptFramework.Main.GameInfo.GetAddressOf(49978, 0xBA, 0, "F3 0F 5C 15");
-                var allowLookDownDisableCheck = NetScriptFramework.Main.GameInfo.GetAddressOf(49978, 0x100, 0, "0F 57 C9 0F 2F C1 73");
+                var allowLookDownMore = NetScriptFramework.Main.GameInfo.GetAddressOf(49978, this.UsesModernCameraLayout ? 0xAC : 0xBA, 0, "F3 0F 5C 15");
+                var allowLookDownDisableCheck = NetScriptFramework.Main.GameInfo.GetAddressOf(49978, this.UsesModernCameraLayout ? 0xF4 : 0x100, 0, "0F 57 C9 0F 2F C1 73");
                 var skipSetAddr = allowLookDownDisableCheck + 0x20;
                 if (!NetScriptFramework.Memory.VerifyBytes(skipSetAddr, "48 8B 44 24 40"))
                     throw new ArgumentException("Failed to verify bytes for disabling down look check!");
 
-                var allowMoveDownDisableCheck = NetScriptFramework.Main.GameInfo.GetAddressOf(36602, 0xE4, 0, "44 0F 2F C7");
+                var allowMoveDownDisableCheck = NetScriptFramework.Main.GameInfo.GetAddressOf(36602, this.UsesModernCameraLayout ? 0xEB : 0xE4, 0, "44 0F 2F C7");
 
                 Memory.WriteHook(new HookParameters()
                 {
@@ -381,6 +388,10 @@ namespace IFPV
                     ctx.DX = new IntPtr((long)1);
             });
 
+            // The entry hook can return before the native prologue runs.
+            var effectNodeReturn = this.UsesModernCameraLayout
+                ? NetScriptFramework.Main.GameInfo.GetAddressOf(33361, 0x33, -1, "5F C3")
+                : NetScriptFramework.Main.GameInfo.GetAddressOf(33361, 0x2D);
             this.InstallHook("magic fire node", 33361, 0, 6, "40 57 48 83 EC 20", ctx =>
             {
                 if (this.CameraMain == null || !this.CameraMain.IsInitialized || !this.CameraMain.WasUsingFirstPersonArms)
@@ -401,19 +412,25 @@ namespace IFPV
                 }
 
                 ctx.Skip();
-                ctx.IP = ctx.IP + 0x2D;
+                ctx.IP = effectNodeReturn;
                 ctx.AX = node.Address;
 
                 //NetScriptFramework.Main.WriteDebugMessage("Replaced node");
             });
 
-            // Block character model fading out
-            this.InstallHook("block fade out", 49899, 0x3C, 6, "4C 8B F2 48 8B F9", ctx =>
+            // In 1.7 the native routine spills R8B before testing the fade flag.
+            this.InstallHook("block fade out", 49899, this.UsesModernCameraLayout ? 0 : 0x3C,
+                this.UsesModernCameraLayout ? 7 : 6,
+                this.UsesModernCameraLayout ? "48 8B C4 44 88 40 18" : "4C 8B F2 48 8B F9", ctx =>
             {
-                if (this.CameraMain != null && this.CameraMain.IsInitialized && this.CameraMain.Values.BlockPlayerFadeOut.CurrentValue >= 0.5)
+                if (this.CameraMain != null && this.CameraMain.IsInitialized
+                    && this.CameraMain.Values.BlockPlayerFadeOut.CurrentValue >= 0.5
+                    && (Settings.Instance.HidePlayerWhenColliding != 1 || !this.CameraMain.DidCollideLastUpdate))
                 {
-                    if (Settings.Instance.HidePlayerWhenColliding != 1 || !this.CameraMain.DidCollideLastUpdate)
-                        ctx.R13 = new IntPtr(0);
+                    if (this.UsesModernCameraLayout)
+                        ctx.R8 = IntPtr.Zero;
+                    else
+                        ctx.R13 = IntPtr.Zero;
                 }
             });
 
@@ -431,14 +448,24 @@ namespace IFPV
 
             if (Settings.Instance.ReplaceDefaultCamera)
             {
+                bool modern = this.UsesModernCameraLayout;
+                var gameInfo = NetScriptFramework.Main.GameInfo;
+                var zoomReturn = modern
+                    ? gameInfo.GetAddressOf(49970, 0x137, 0, "48 8B 5C 24 40 48 8B 74 24 48 48 83 C4 30 5F C3")
+                    : IntPtr.Zero;
+                var firstPersonReturn = modern
+                    ? gameInfo.GetAddressOf(49858, 0x3F, -5, "48 83 C4 20 5B C3")
+                    : IntPtr.Zero;
+
                 // Make sure we always use the custom code instead of allowing min zoom to enter first person.
-                this.InstallHook("replace zoom #1", 49970, 0x1E1, 5, "E8", null, ctx =>
+                this.InstallHook("block minimum zoom transition", 49970, modern ? 0x1F0 : 0x1E1, 5,
+                    modern ? "E8 ?? ?? ?? ?? 84 C0 74 35" : "E8", null, ctx =>
                 {
                     ctx.AX = IntPtr.Zero;
                 });
 
                 // Custom zoom
-                this.InstallHook("replace zoom #1", 49970, 0x22F, 7, "48 8B 8B E8 01 00 00", ctx =>
+                this.InstallHook("replace zoom", 49970, modern ? 0x23E : 0x22F, 7, "48 8B 8B E8 01 00 00", ctx =>
                 {
                     IntPtr cptr = Memory.ReadPointer(ctx.AX);
                     IntPtr dptr = Memory.ReadPointer(ctx.BX + 0x1E8);
@@ -448,31 +475,33 @@ namespace IFPV
                         this.CameraMain.HandleZoom(third, cptr == dptr);
 
                     ctx.Skip();
-                    ctx.IP = ctx.IP + 0x40;
+                    ctx.IP = modern ? zoomReturn : ctx.IP + 0x40;
                 });
 
                 // Dragon and horse must use regular toggle pov handler
                 {
+                    string mountPovBranch = modern ? "74 62" : "74 52";
                     var ptr = PrepareFunction("dragon toggle pov", 32363, 0x1F);
-                    if (!Memory.VerifyBytes(ptr, "74 52", true))
+                    if (!Memory.VerifyBytes(ptr, mountPovBranch, true))
                         throw new InvalidOperationException("Couldn't verify byte pattern for 'dragon toggle pov'!");
                     Memory.WriteUInt8(ptr, 0xEB, true);
                     ptr = PrepareFunction("horse toggle pov", 49832, 0x1F);
-                    if (!Memory.VerifyBytes(ptr, "74 52", true))
+                    if (!Memory.VerifyBytes(ptr, mountPovBranch, true))
                         throw new InvalidOperationException("Couldn't verify byte pattern for 'horse toggle pov'!");
                     Memory.WriteUInt8(ptr, 0xEB, true);
                 }
 
                 // Don't toggle pov from zoom delayed parameter
                 {
-                    var ptr = PrepareFunction("zoom delayed toggle pov", 49977, 0x291);
+                    var ptr = PrepareFunction("zoom delayed toggle pov", 49977, modern ? 0x297 : 0x291);
                     if (!Memory.VerifyBytes(ptr, "74 1C", true))
                         throw new InvalidOperationException("Couldn't verify byte pattern for 'zoom delayed toggle pov'!");
                     Memory.WriteUInt8(ptr, 0xEB, true);
                 }
 
                 // Toggle POV hotkey was pressed
-                this.InstallHook("toggle pov", 49970, 0xD5, 5, "E8", null, ctx =>
+                this.InstallHook("toggle pov", 49970, modern ? 0xE5 : 0xD5, 5,
+                    modern ? "E8 ?? ?? ?? ?? 84 C0 74 31" : "E8", null, ctx =>
                 {
                     // Skip default action
                     ctx.AX = new IntPtr((long)0);
@@ -526,7 +555,7 @@ namespace IFPV
                     if (skip)
                     {
                         ctx.Skip();
-                        ctx.IP = ctx.IP + 0x39;
+                        ctx.IP = modern ? firstPersonReturn : ctx.IP + 0x39;
                     }
 
                     if (want && !this.CameraMain.AlreadyHasWantState())
@@ -534,7 +563,9 @@ namespace IFPV
                 });
             }
 
-            this.InstallHook("fix crosshair pick", 39534, 0x159, 10, "F3 0F 58 45 E8 F3 0F 11 45 D8", ctx =>
+            // Hook the final Z store so the engine cannot overwrite the replacement origin.
+            this.InstallHook("fix crosshair pick", 39534, this.UsesModernCameraLayout ? 0x177 : 0x159,
+                10, "F3 0F 58 45 E8 F3 0F 11 45 D8", ctx =>
             {
                 if (this.CameraMain != null && this.CameraMain.IsInitialized && this.CameraMain.IsEnabled)
                 {
@@ -549,7 +580,8 @@ namespace IFPV
                 }
             });
 
-            this.InstallHook("fix look sensitivity", 41275, 0x38D, 0xE, "75 0E", ctx =>
+            this.InstallHook("fix look sensitivity", 41275, this.UsesModernCameraLayout ? 0x45B : 0x38D, 0xE,
+                this.UsesModernCameraLayout ? "75 0E F2 0F 10 05 ?? ?? ?? ?? F2 0F 11 03 EB 36" : "75 0E", ctx =>
             {
                 if (this.CameraMain != null && this.CameraMain.IsInitialized)
                 {
@@ -561,19 +593,23 @@ namespace IFPV
                 }
             }, null, true);
 
-            this.InstallHook("switch skeleton override", 39401, 0, 7, "40 55 56 48 83 EC 78", ctx =>
+            var switchSkeletonReturn = this.UsesModernCameraLayout
+                ? NetScriptFramework.Main.GameInfo.GetAddressOf(39401, 0x2C6, -2, "5E 5D C3")
+                : this.SwitchSkeleton + 0x2DD;
+            var switchSkeletonPrologue = this.UsesModernCameraLayout ? "40 55 56 48 83 EC 58" : "40 55 56 48 83 EC 78";
+            this.InstallHook("switch skeleton override", 39401, 0, 7, switchSkeletonPrologue, ctx =>
             {
                 if (this.CameraMain != null && this.CameraMain.IsInitialized)
                 {
                     if (this.CameraMain.HookSwitchSkeleton(MemoryObject.FromAddress<Actor>(ctx.CX), ctx.DX.ToBool()))
                     {
                         ctx.Skip();
-                        ctx.IP = ctx.IP + 0x2DD;
+                        ctx.IP = switchSkeletonReturn;
                     }
                 }
             });
 
-            this.InstallHook("fix bound node update", 18683, 0x7C, 6, "FF 90 68 04 00 00", ctx =>
+            this.InstallHook("fix bound node update", 18683, this.UsesModernCameraLayout ? 0x7A : 0x7C, 6, "FF 90 68 04 00 00", ctx =>
             {
                 if (this.CameraMain != null && this.CameraMain.IsInitialized && this.CameraMain.IsEnabled)
                 {
@@ -600,17 +636,21 @@ namespace IFPV
             {
                 System.Threading.Interlocked.Decrement(ref _is_spine);
             });
-            this.InstallHook("player control inc counter", 41259, 0, 5, "48 89 5C 24 08", ctx =>
+            this.InstallHook("player control inc counter", 41259, 0, 5,
+                this.UsesModernCameraLayout ? "48 8B C4 56 57" : "48 89 5C 24 08", ctx =>
             {
                 System.Threading.Interlocked.Increment(ref _is_spine);
             });
 
-            this.InstallHook("player controls dec counter", 41259, 0x241, 5, "48 83 C4 30 5F", ctx =>
+            // Early exits and normal input processing share this epilogue in 1.7.
+            this.InstallHook("player controls dec counter", 41259, this.UsesModernCameraLayout ? 0x55C : 0x241,
+                this.UsesModernCameraLayout ? 8 : 5,
+                this.UsesModernCameraLayout ? "4C 8D 9C 24 80 00 00 00" : "48 83 C4 30 5F", ctx =>
             {
                 System.Threading.Interlocked.Decrement(ref _is_spine);
             });
 
-            this.InstallHook("player movement controller type", 40937, 0x2EA, 6, "FF 90 88 03 00 00", null, ctx =>
+            this.InstallHook("player movement controller type", 40937, this.UsesModernCameraLayout ? 0x303 : 0x2EA, 6, "FF 90 88 03 00 00", null, ctx =>
             {
                 if (this.CameraMain != null && this.CameraMain.IsInitialized)
                 {
@@ -642,6 +682,14 @@ namespace IFPV
                 Before = func,
                 After = after
             });
+        }
+
+        private IntPtr PrepareEffectNodeReturn(ulong vid, int legacyOffset, int modernOffset)
+        {
+            var gameInfo = NetScriptFramework.Main.GameInfo;
+            return this.UsesModernCameraLayout
+                ? gameInfo.GetAddressOf(vid, modernOffset, -3, "FF 50 70")
+                : gameInfo.GetAddressOf(vid, legacyOffset);
         }
 
         private IntPtr PrepareFunction(string name, ulong vid, int offset)
