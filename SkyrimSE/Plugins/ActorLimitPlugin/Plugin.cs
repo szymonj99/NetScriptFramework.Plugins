@@ -34,6 +34,8 @@ namespace ActorLimitPlugin
             }
         }
 
+        private const ulong ContainsNearbyActorVid = 0x100000003;
+
         internal Settings Settings;
 
         protected override bool Initialize(bool loadedAny)
@@ -41,11 +43,14 @@ namespace ActorLimitPlugin
             this.Settings = new Settings();
             this.Settings.Load();
 
+            bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
+            var gameInfo = NetScriptFramework.Main.GameInfo;
+
             // Maximum actor movement updates.
             if(this.Settings.MoverLimit != 128)
             {
-                var funcAssign = NetScriptFramework.Main.GameInfo.GetAddressOf(40296, 0x90, 0, "BE");
-                var funcComp = NetScriptFramework.Main.GameInfo.GetAddressOf(40296, 0x9C, 0, "3D");
+                var funcAssign = gameInfo.GetAddressOf(40296, modern ? 0x92 : 0x90, 0, "BE");
+                var funcComp = gameInfo.GetAddressOf(40296, modern ? 0x9E : 0x9C, 0, "3D");
 
                 int defaultCap = 128;
                 int prev = NetScriptFramework.Memory.ReadInt32(funcAssign + 1);
@@ -66,82 +71,48 @@ namespace ActorLimitPlugin
             // Replace static buffer.
             if(this.Settings.ReplaceStaticBuffer)
             {
+                var contains = gameInfo.GetAddressOf(40435, 0x21, 0, modern ? "48 8D 0D 58 4D AC 02" : "48 8D 0D");
+                var containsStride = gameInfo.GetAddressOf(40435, 0x31, 0, "48 C1 E3 09");
+                var copy = gameInfo.GetAddressOf(40277, 0x26, 0, modern ? "48 8D 0D E3 44 AD 02" : "48 8D 0D");
+                var copyStride = gameInfo.GetAddressOf(40277, 0x22, 0, "48 C1 E3 09");
+                var morph = gameInfo.GetAddressOf(40427, modern ? 0x1D0 : 0x1C1, 0, modern ? "48 8D 0D 69 57 AC 02" : "48 8D 0D");
+                var morphStride = gameInfo.GetAddressOf(40427, modern ? 0x1CC : 0x1BD, 0, "48 C1 E7 09");
+                var append = gameInfo.GetAddressOf(40434, modern ? 0xBA : 0x61, 0, modern ? "48 8D 05 EF 4E AC 02" : "48 8D 05");
+                var appendStride = gameInfo.GetAddressOf(40434, modern ? 0xB6 : 0x70, 0, "48 C1 E3 09");
+                var appendLimit = gameInfo.GetAddressOf(40434, modern ? 0x94 : 0x41, 0, modern ? "83 FF 40 0F 83 DF 00 00 00" : "83 FF 40");
+                var appendExit = gameInfo.GetAddressOf(40434, modern ? 0x17C : 0x137, 0, modern ? "49 8B CE 48 8B 9C 24 80 00 00 00" : "48 8B 6C 24 60");
+
+                // 1.7 also reads the current bank through ProcessLists::ContainsNearbyActor.
+                var search = modern ? gameInfo.GetAddressOf(ContainsNearbyActorVid, 0x60, 0, "48 8D 0D 49 02 AD 02") : IntPtr.Zero;
+                var searchStride = modern ? gameInfo.GetAddressOf(ContainsNearbyActorVid, 0x6E, 0, "48 C1 E7 09") : IntPtr.Zero;
+
                 var alloc = Memory.Allocate(0x2000);
                 alloc.Pin();
-
                 Memory.WriteZero(alloc.Address, alloc.Size);
 
-                var addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40435, 0x21, 0, "48 8D 0D");
+                ReplaceBufferAddress(contains, ctx => ctx.CX = alloc.Address);
+                Memory.WriteUInt8(containsStride + 3, 12, true);
+                ReplaceBufferAddress(copy, ctx => ctx.CX = alloc.Address);
+                Memory.WriteUInt8(copyStride + 3, 12, true);
+                ReplaceBufferAddress(morph, ctx => ctx.CX = alloc.Address);
+                Memory.WriteUInt8(morphStride + 3, 12, true);
+                ReplaceBufferAddress(append, ctx => ctx.AX = alloc.Address);
+                Memory.WriteUInt8(appendStride + 3, 12, true);
+                if (modern)
+                {
+                    ReplaceBufferAddress(search, ctx => ctx.CX = alloc.Address);
+                    Memory.WriteUInt8(searchStride + 3, 12, true);
+                }
+
                 Memory.WriteHook(new HookParameters()
                 {
-                    Address = addr,
-                    IncludeLength = 0,
-                    ReplaceLength = 7,
-                    Before = ctx =>
-                    {
-                        ctx.CX = alloc.Address;
-                    },
-                });
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40435, 0x31, 0, "48 C1 E3 09");
-                Memory.WriteUInt8(addr + 3, 12, true);
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40277, 0x26, 0, "48 8D 0D");
-                Memory.WriteHook(new HookParameters()
-                {
-                    Address = addr,
-                    IncludeLength = 0,
-                    ReplaceLength = 7,
-                    Before = ctx =>
-                    {
-                        ctx.CX = alloc.Address;
-                    }
-                });
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40277, 0x22, 0, "48 C1 E3 09");
-                Memory.WriteUInt8(addr + 3, 12, true);
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40427, 0x1C1, 0, "48 8D 0D");
-                Memory.WriteHook(new HookParameters()
-                {
-                    Address = addr,
-                    IncludeLength = 0,
-                    ReplaceLength = 7,
-                    Before = ctx =>
-                    {
-                        ctx.CX = alloc.Address;
-                    }
-                });
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40427, 0x1BD, 0, "48 C1 E7 09");
-                Memory.WriteUInt8(addr + 3, 12, true);
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40434, 0x61, 0, "48 8D 05");
-                Memory.WriteHook(new HookParameters()
-                {
-                    Address = addr,
-                    IncludeLength = 0,
-                    ReplaceLength = 7,
-                    Before = ctx =>
-                    {
-                        ctx.AX = alloc.Address;
-                    }
-                });
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40434, 0x70, 0, "48 C1 E3 09");
-                Memory.WriteUInt8(addr + 3, 12, true);
-
-                addr = NetScriptFramework.Main.GameInfo.GetAddressOf(40434, 0x41, 0, "83 FF 40");
-                var addr2 = NetScriptFramework.Main.GameInfo.GetAddressOf(40434, 0x137, 0, "48 8B 6C 24 60");
-                Memory.WriteHook(new HookParameters()
-                {
-                    Address = addr,
+                    Address = appendLimit,
                     IncludeLength = 0,
                     ReplaceLength = 9,
                     Before = ctx =>
                     {
                         if(ctx.DI.ToUInt32() >= 512)
-                            ctx.IP = addr2;
+                            ctx.IP = appendExit;
                     }
                 });
 
@@ -162,9 +133,9 @@ namespace ActorLimitPlugin
             {
                 int want = !this.Settings.ReplaceStaticBuffer ? Math.Min(62, this.Settings.MorphLimit) : Math.Min(510, this.Settings.MorphLimit);
                 int defaultCap = 0xA;
-                var cap1 = NetScriptFramework.Main.GameInfo.GetAddressOf(40427, 0x1D9, 0, "BE");
+                var cap1 = gameInfo.GetAddressOf(40427, modern ? 0x1E8 : 0x1D9, 0, "BE");
                 int read1 = Memory.ReadInt32(cap1 + 1);
-                var cap2 = NetScriptFramework.Main.GameInfo.GetAddressOf(507579, 8);
+                var cap2 = gameInfo.GetAddressOf(507579, 8);
                 int read2 = Memory.ReadInt32(cap2);
                 if (read1 != defaultCap || read2 != defaultCap)
                 {
@@ -178,6 +149,17 @@ namespace ActorLimitPlugin
             }
 
             return true;
+        }
+
+        private static void ReplaceBufferAddress(IntPtr address, Action<CPURegisters> setRegister)
+        {
+            Memory.WriteHook(new HookParameters()
+            {
+                Address = address,
+                IncludeLength = 0,
+                ReplaceLength = 7,
+                Before = setRegister
+            });
         }
     }
 }
