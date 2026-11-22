@@ -55,6 +55,7 @@ namespace NoLockPicking
         internal CachedVid Addr_LockedSound_Var;
 
         internal IntPtr FakeMenu;
+        private bool _modernLayout;
 
         public static Settings cfg
         {
@@ -71,13 +72,15 @@ namespace NoLockPicking
                 return true;
             
             bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
+            this._modernLayout = modern;
             this.Addr_DoorOpen_Func = CachedVid.Initialize(17521);
             this.Addr_DoorOpen_Hook = CachedVid.Initialize(17521, modern ? 0x32A : 0x313, 0,
                 modern ? "E8 21 A7 6C 00 E9 75 FD FF FF" : "E8 ? ? ? ? E9");
             this.Addr_DoorOpen_Jmp = CachedVid.Initialize(17521, modern ? 0xAB : 0x65B, 0, "48 8B 9C 24 D0 01 00 00 48 81 C4 80 01 00 00");
 
             this.Addr_ContOpen_Func = CachedVid.Initialize(17485);
-            this.Addr_ContOpen_Hook = CachedVid.Initialize(17485, 0x1AC, 0, "E8 ? ? ? ? 32 C0");
+            this.Addr_ContOpen_Hook = CachedVid.Initialize(17485, modern ? 0x18A : 0x1AC, 0,
+                modern ? "E8 C1 BE 6C 00 32 C0" : "E8 ? ? ? ? 32 C0");
 
             this.Addr_CheckItemCount_Func = CachedVid.Initialize(19275);
             this.Addr_ImpossibleLock_Setting = CachedVid.Initialize(506405);
@@ -292,7 +295,8 @@ namespace NoLockPicking
                 return OpenResults.Return0;
             }
 
-            var extraLock = obj.GetLockData(true);
+            // The 1.7 GetLockData already follows the linked door when needed.
+            var extraLock = obj.GetLockData(!this._modernLayout);
             if(extraLock == null)
             {
                 Report("NoLockPicking: ERROR #3!");
@@ -338,7 +342,9 @@ namespace NoLockPicking
                 IntPtr mgrPtr;
                 if(objMgr != null && (mgrPtr = objMgr.Cast<BGSDefaultObjectManager>()) != IntPtr.Zero)
                 {
-                    if(Memory.ReadUInt8(mgrPtr + 0xB85) != 0)
+                    // Skeleton key is default object 5 in both layouts.
+                    int initializedOffset = this._modernLayout ? 0xBC5 : 0xB85;
+                    if(Memory.ReadUInt8(mgrPtr + initializedOffset) != 0)
                     {
                         var skey = Memory.ReadPointer(mgrPtr + 0x48);
                         if (skey != IntPtr.Zero && Memory.InvokeCdecl(this.Addr_CheckItemCount_Func.Value, plrPtr, skey).ToInt32Safe() > 0)
@@ -462,8 +468,9 @@ namespace NoLockPicking
                 Memory.WritePointer(this.Addr_CurrentLockPickTarget_Var.Value, objPtr);
                 Memory.WriteInt32(this.Addr_CurrentLockPickRank_Var.Value, Math.Max(0, Math.Min(4, (int)lockDifficulty)));
                 Memory.WritePointer(this.Addr_CurrentLockPickThing_Var.Value, IntPtr.Zero);
-                Memory.WriteUInt8(this.FakeMenu + 0x10D, 0);
-                Memory.WriteUInt8(this.FakeMenu + 0x10B, 1);
+                int menuFlagOffset = this._modernLayout ? 0x14 : 0;
+                Memory.WriteUInt8(this.FakeMenu + (0x10D + menuFlagOffset), 0);
+                Memory.WriteUInt8(this.FakeMenu + (0x10B + menuFlagOffset), 1);
                 Memory.InvokeCdecl(this.Addr_ActualUnlock_Func.Value, this.FakeMenu);
                 Memory.WritePointer(this.Addr_CurrentLockPickTarget_Var.Value, IntPtr.Zero);
                 IsDoingOurUnlocking--;
