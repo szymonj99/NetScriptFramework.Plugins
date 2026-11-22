@@ -70,9 +70,11 @@ namespace NoLockPicking
             if (!cfg.Enabled)
                 return true;
             
+            bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
             this.Addr_DoorOpen_Func = CachedVid.Initialize(17521);
-            this.Addr_DoorOpen_Hook = CachedVid.Initialize(17521, 0x313, 0, "E8 ? ? ? ? E9");
-            this.Addr_DoorOpen_Jmp = CachedVid.Initialize(17521, 0x65B, 0, "48 8B 9C 24 D0 01 00 00 48 81 C4 80 01 00 00");
+            this.Addr_DoorOpen_Hook = CachedVid.Initialize(17521, modern ? 0x32A : 0x313, 0,
+                modern ? "E8 21 A7 6C 00 E9 75 FD FF FF" : "E8 ? ? ? ? E9");
+            this.Addr_DoorOpen_Jmp = CachedVid.Initialize(17521, modern ? 0xAB : 0x65B, 0, "48 8B 9C 24 D0 01 00 00 48 81 C4 80 01 00 00");
 
             this.Addr_ContOpen_Func = CachedVid.Initialize(17485);
             this.Addr_ContOpen_Hook = CachedVid.Initialize(17485, 0x1AC, 0, "E8 ? ? ? ? 32 C0");
@@ -104,8 +106,10 @@ namespace NoLockPicking
                 ReplaceLength = 5,
                 Before = ctx =>
                 {
-                    var actor = MemoryObject.FromAddress<Actor>(ctx.DI);
-                    var obj = MemoryObject.FromAddress<TESObjectREFR>(ctx.BX);
+                    var actorAddress = modern ? ctx.SI : ctx.DI;
+                    var objectAddress = modern ? ctx.DI : ctx.BX;
+                    var actor = MemoryObject.FromAddress<Actor>(actorAddress);
+                    var obj = MemoryObject.FromAddress<TESObjectREFR>(objectAddress);
 
                     lock(_tryUnlockLocker)
                     {
@@ -132,8 +136,8 @@ namespace NoLockPicking
 
                                     var sp = ctx.SP + 0x180;
                                     IntPtr a1 = Memory.ReadPointer(sp + 0x40);
-                                    IntPtr a2 = ctx.BX;
-                                    IntPtr a3 = ctx.R14;
+                                    IntPtr a2 = objectAddress;
+                                    IntPtr a3 = modern ? actorAddress : ctx.R14;
                                     IntPtr a4 = IntPtr.Zero; // Doesn't seem to be used.
                                     IntPtr a5 = IntPtr.Zero; // Not used for door?
                                     IntPtr a6 = IntPtr.Zero; // Not used for door?

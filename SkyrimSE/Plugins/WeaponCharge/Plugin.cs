@@ -221,15 +221,15 @@ namespace WeaponCharge
                         if (max <= 0.0f)
                             continue;
 
-                        bool isWorn = Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 1, 0).ToInt32Safe() != 0;
+                        bool isWorn = Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 1, 0).ToBool();
                         int av = -1;
                         if(isWorn)
                         {
                             var enchantment = Memory.InvokeCdecl(this.Addr_GetEnchantment_Func, fptr, eptr);
                             if (enchantment != IntPtr.Zero)
                             {
-                                //bool isLeft = Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 0, 1).ToInt32Safe() != 0;
-                                bool isLeft = Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 0, 0).ToInt32Safe() == 0 && Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 0, 1).ToInt32Safe() != 0;
+                                bool isLeft = !Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 0, 0).ToBool()
+                                    && Memory.InvokeCdecl(this.Addr_IsWorn_Func, eptr, 0, 1).ToBool();
                                 av = Memory.InvokeCdecl(this.Addr_GetActorValueForCost_Func, enchantment, isLeft ? 0 : 1).ToInt32Safe();
                                 if (av != 0x40 && av != 0x52)
                                     av = -1;
