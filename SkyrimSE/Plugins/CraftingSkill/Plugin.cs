@@ -100,10 +100,14 @@ namespace CraftingSkill
             // Alchemy (create potion).
             if(alchemyMode >= 2 && alchemyMode <= 3)
             {
-                fn_Alchemy1 = NetScriptFramework.Main.GameInfo.GetAddressOf(50424);
-                fn_Alchemy2 = NetScriptFramework.Main.GameInfo.GetAddressOf(50463);
+                if (!modern)
+                {
+                    fn_Alchemy1 = NetScriptFramework.Main.GameInfo.GetAddressOf(50424);
+                    fn_Alchemy2 = NetScriptFramework.Main.GameInfo.GetAddressOf(50463);
+                }
 
-                this.InstallHook(50449, 0x207, 6, "FF 90 B8 07 00 00", _Hook_Alchemy);
+                this.InstallHook(50449, modern ? 0x202 : 0x207, 6, "FF 90 B8 07 00 00",
+                    ctx => _Hook_Alchemy(ctx, modern));
             }
         }
 
@@ -420,31 +424,71 @@ namespace CraftingSkill
             ctx.XMM2f = xp;
         }
 
-        private static void _Hook_Alchemy(CPURegisters ctx)
+        private static bool TryReadModernAlchemyIngredients(IntPtr menu, List<TESForm> ingredients)
         {
-            var menu = ctx.R13;
-            var menuArray = menu + 280;
+            int count = Memory.ReadInt32(menu + 0x130);
+            var inventory = Memory.ReadPointer(menu + 0x100);
+            if (count <= 0 || inventory == IntPtr.Zero)
+                return false;
 
-            List<TESForm> ingredients = new List<TESForm>(4);
+            // The selected inventory indices use inline storage when the allocator's high bit is set.
+            var selected = menu + 0x120;
+            if (Memory.ReadInt32(menu + 0x118) >= 0)
+                selected = Memory.ReadPointer(selected);
+            if (selected == IntPtr.Zero)
+                return false;
 
-            using (var alloc = Memory.Allocate(0x20))
+            int inventoryCount = Memory.ReadInt32(menu + 0x110);
+            for (int i = 0; i < count; i++)
             {
-                Memory.InvokeCdecl(fn_Alchemy1, menuArray, alloc.Address);
-                Memory.InvokeCdecl(fn_Alchemy2, menuArray, alloc.Address + 0x10);
-                var v96 = Memory.ReadPointer(alloc.Address);
-                var v28 = Memory.ReadPointer(alloc.Address + 0x10);
-                while (v28 != v96)
+                int index = Memory.ReadInt32(selected + 4 * i);
+                if (index < 0 || index >= inventoryCount)
+                    return false;
+
+                var entry = Memory.ReadPointer(inventory + 16 * index);
+                if (entry == IntPtr.Zero)
+                    return false;
+                var ingredient = MemoryObject.FromAddress<TESForm>(Memory.ReadPointer(entry));
+                if (ingredient == null)
+                    return false;
+                ingredients.Add(ingredient);
+            }
+            return true;
+        }
+
+        private static void _Hook_Alchemy(CPURegisters ctx, bool modern)
+        {
+            List<TESForm> ingredients = new List<TESForm>(4);
+            if (modern)
+            {
+                if (!TryReadModernAlchemyIngredients(ctx.R15, ingredients))
+                    return;
+            }
+            else
+            {
+                var menu = ctx.R13;
+                var menuArray = menu + 280;
+                using (var alloc = Memory.Allocate(0x20))
                 {
-                    var v30 = Memory.ReadPointer(Memory.ReadPointer(Memory.ReadPointer(menu + 256) + 16 * Memory.ReadInt32(v96)));
+                    Memory.InvokeCdecl(fn_Alchemy1, menuArray, alloc.Address);
+                    Memory.InvokeCdecl(fn_Alchemy2, menuArray, alloc.Address + 0x10);
+                    var v96 = Memory.ReadPointer(alloc.Address);
+                    var v28 = Memory.ReadPointer(alloc.Address + 0x10);
+                    while (v28 != v96)
+                    {
+                        var v30 = Memory.ReadPointer(Memory.ReadPointer(Memory.ReadPointer(menu + 256) + 16 * Memory.ReadInt32(v96)));
 
-                    var item = MemoryObject.FromAddress<TESForm>(v30);
-                    ingredients.Add(item);
+                        var item = MemoryObject.FromAddress<TESForm>(v30);
+                        ingredients.Add(item);
 
-                    v96 = v96 + 4;
+                        v96 = v96 + 4;
+                    }
                 }
             }
 
             var potion = MemoryObject.FromAddress<MagicItem>(Memory.ReadPointer(ctx.SP + 0x50));
+            if (modern && potion == null)
+                return;
 
             float skill = 5.0f;
             var plr = PlayerCharacter.Instance;
