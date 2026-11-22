@@ -297,7 +297,7 @@ namespace IFPV.States
                 if (Settings.Instance.TryFixLeftRightMovementClipping != 0.0f && !this.Stack.CameraMain.WasUsingFirstPersonArms && ((moveType = States.Moving._move_dir) == 2 || moveType == 6))
                 {
                     bool swimming = false;
-                    if (update.Target.Actor != null && (NetScriptFramework.Memory.ReadUInt32(update.Target.Actor.Address + 0xC0) & 0x400) != 0)
+                    if (update.Target.Actor != null && (update.Target.Actor.GetActorStateData(0, 14) & 0x400) != 0)
                         swimming = true;
 
                     if (!swimming)

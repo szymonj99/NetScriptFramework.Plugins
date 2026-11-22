@@ -54,7 +54,7 @@ namespace IFPV.States
                 return;
             }
             
-            uint moveFlags = NetScriptFramework.Memory.ReadUInt32(actor.Address + 0xC0) & 0x3FFF;
+            uint moveFlags = (uint)actor.GetActorStateData(0, 14);
             uint mask = 0xCF;
 
             if ((moveFlags & mask) == 0)
@@ -155,7 +155,7 @@ namespace IFPV.States
                         ok = false;
                     else
                     {
-                        uint flags = NetScriptFramework.Memory.ReadUInt32(actor.Address + 0xC0);
+                        uint flags = (uint)actor.GetActorStateData(0, 32);
                         if ((flags & 0x400) != 0)
                             ok = false;
                     }

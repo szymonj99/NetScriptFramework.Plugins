@@ -40,7 +40,7 @@ namespace IFPV.States
             if (!actor.IsSneaking)
                 return false;
 
-            uint flags = NetScriptFramework.Memory.ReadUInt32(actor.Address + 0xC0) & 0x3FFF;
+            uint flags = (uint)actor.GetActorStateData(0, 14);
             return (flags & 0x100) != 0;
         }
     }

@@ -38,7 +38,7 @@ namespace IFPV.States
                 return false;
 
             // Aiming bow or crossbow.
-            uint flags = Memory.ReadUInt32(actor.Address + 0xC0) >> 28;
+            uint flags = (uint)actor.GetActorStateData(28, 4);
             if (flags == 0xA)
                 return true;
             
