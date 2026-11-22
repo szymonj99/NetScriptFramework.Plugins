@@ -23,7 +23,7 @@ namespace BugFixesSSE.Fixes
         }
 
         private IntPtr NoConditionCheck;
-        private IntPtr GameSettingValue;
+        private IntPtr CheckRate;
 
 #if DEBUG_TEST
         private int _debug_lastup = 0;
@@ -56,7 +56,7 @@ namespace BugFixesSSE.Fixes
 
             if(this.UpdateDiff < 0)
             {
-                double interval = Math.Max(0.001f, NetScriptFramework.Memory.ReadFloat(this.GameSettingValue));
+                double interval = Math.Max(0.001f, NetScriptFramework.Memory.ReadFloat(this.CheckRate));
                 this.UpdateDiff = (long)(1000.0 / interval);
                 if (this.UpdateDiff <= 0)
                     this.UpdateDiff = 1;
@@ -74,10 +74,17 @@ namespace BugFixesSSE.Fixes
         {
             this.ForceAccurate = this.BoolParameters["ForceAccurateCheck"];
 
+            bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
             ulong funcVid = 33287;
-            var loc1 = NetScriptFramework.Main.GameInfo.GetAddressOf(funcVid, 0xDD, 0, "F3 0F 10 4F 70");
-            this.NoConditionCheck = NetScriptFramework.Main.GameInfo.GetAddressOf(funcVid, 0x1DD, 0, "48 8B 5C 24 58");
-            this.GameSettingValue = NetScriptFramework.Main.GameInfo.GetAddressOf(506258, 8);
+            var loc1 = NetScriptFramework.Main.GameInfo.GetAddressOf(funcVid, modern ? 0x8F : 0xDD, 0,
+                modern ? "F3 0F 10 4F 70 0F 28 D1 F3 0F 10 1D F1 5E C5 02" : "F3 0F 10 4F 70");
+            this.NoConditionCheck = NetScriptFramework.Main.GameInfo.GetAddressOf(funcVid, modern ? 0x1CE : 0x1DD, 0,
+                modern ? "48 8B 5C 24 78 48 8B B4 24 80 00 00 00" : "48 8B 5C 24 58");
+
+            // 1.7 initializes a cached checks-per-second value before reaching the hook.
+            // The RIP-relative load at loc1 + 8 ends at loc1 + 0x10.
+            this.CheckRate = modern ? loc1 + 0x10 + NetScriptFramework.Memory.ReadInt32(loc1 + 0xC)
+                : NetScriptFramework.Main.GameInfo.GetAddressOf(506258, 8);
             
             NetScriptFramework.Memory.WriteHook(new NetScriptFramework.HookParameters()
             {
@@ -104,7 +111,7 @@ namespace BugFixesSSE.Fixes
                         // No floating point inaccuracy, do this without locking.
                         if (!this.ForceAccurate && elapsedSeconds <= 86400.0)
                         {
-                            double calculatedInterval = NetScriptFramework.Memory.ReadFloat(this.GameSettingValue);
+                            double calculatedInterval = NetScriptFramework.Memory.ReadFloat(this.CheckRate);
                             long prevCounter = (long)(elapsedSeconds * calculatedInterval);
                             long nextCounter = (long)((elapsedSeconds + diff) * calculatedInterval);
 

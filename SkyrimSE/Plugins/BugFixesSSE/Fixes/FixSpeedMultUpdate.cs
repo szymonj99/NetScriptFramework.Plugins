@@ -21,14 +21,25 @@ namespace BugFixesSSE.Fixes
         private IntPtr UnkGlobal;
         private IntPtr UpdateSpeed;
 
+        private void InstallCallback(IntPtr slot)
+        {
+            if (NetScriptFramework.Memory.ReadPointer(slot) != IntPtr.Zero)
+                throw new InvalidOperationException("The fix " + this.Key + " can't be applied because there was already something else there!");
+
+            NetScriptFramework.Memory.WritePointer(slot, this.CustomFunc);
+        }
+
         internal override void Apply()
         {
+            bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
             this.UnkFunc = NetScriptFramework.Main.GameInfo.GetAddressOf(36585);
             this.UnkGlobal = NetScriptFramework.Main.GameInfo.GetAddressOf(516851);
             this.UpdateSpeed = NetScriptFramework.Main.GameInfo.GetAddressOf(36916);
             var replace1 = NetScriptFramework.Main.GameInfo.GetAddressOf(517383, -8);
-            var hook1 = NetScriptFramework.Main.GameInfo.GetAddressOf(5998, 4, 0, "E8");
-            //var func1 = NetScriptFramework.Main.GameInfo.GetAddressOf(37541); // This causes bad "overencumbered" message sometimes
+            var hook1 = NetScriptFramework.Main.GameInfo.GetAddressOf(5998, modern ? 0x39 : 4, 0,
+                modern ? "48 89 10 48 89 50 08" : "E8");
+            int hookLength = modern ? 7 : 5;
+            int flagsOffset = modern ? 0x340 : 208;
 
             var alloc = NetScriptFramework.Memory.Allocate(0x20, 0, true);
             alloc.Pin();
@@ -48,23 +59,25 @@ namespace BugFixesSSE.Fixes
                     NetScriptFramework.Memory.InvokeCdecl(this.UnkFunc, actor);
 
                     var gb = NetScriptFramework.Memory.ReadPointer(this.UnkGlobal);
-                    if (gb != IntPtr.Zero && ((NetScriptFramework.Memory.ReadUInt32(gb + 208) >> 1) & 1) == 0)
+                    if (gb != IntPtr.Zero && ((NetScriptFramework.Memory.ReadUInt32(gb + flagsOffset) >> 1) & 1) == 0)
                         NetScriptFramework.Memory.InvokeCdecl(this.UpdateSpeed, actor);
                 },
             });
 
+            // The InventoryWeight entry follows SpeedMult and becomes non-null during initialization.
+            if (modern && NetScriptFramework.Memory.ReadPointer(replace1 + 8) != IntPtr.Zero)
+            {
+                this.InstallCallback(replace1);
+                return;
+            }
+
+            // The 1.7 site runs after the native loop has cleared the SpeedMult entry.
             NetScriptFramework.Memory.WriteHook(new NetScriptFramework.HookParameters()
             {
                 Address = hook1,
-                IncludeLength = 5,
-                ReplaceLength = 5,
-                After = ctx =>
-                {
-                    if (NetScriptFramework.Memory.ReadPointer(replace1) != IntPtr.Zero)
-                        throw new InvalidOperationException("The fix " + this.Key + " can't be applied because there was already something else there!");
-
-                    NetScriptFramework.Memory.WritePointer(replace1, this.CustomFunc);
-                },
+                IncludeLength = hookLength,
+                ReplaceLength = hookLength,
+                After = ctx => this.InstallCallback(replace1),
             });
         }
     }

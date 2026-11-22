@@ -50,7 +50,6 @@ namespace BetterStealing
             return true;
         }
 
-        internal static IntPtr _SetItemOwner_Func;
         internal static IntPtr _SetListOwner_Func;
         internal static IntPtr _GetCount_Func;
         internal static IntPtr _SetNorth_Func;
@@ -136,6 +135,7 @@ namespace BetterStealing
         
         private void init()
         {
+            bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
             NeverKeywords = (Settings.Instance.IgnoreKeywords ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).ToList();
             AlwaysKeywords = (Settings.Instance.AlwaysKeywords ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).ToList();
             RequiredKeywords = (Settings.Instance.RequireKeywords ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -143,6 +143,14 @@ namespace BetterStealing
             
             if (Settings.Instance.Enabled)
             {
+                _SetListOwner_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11463);
+                _GetCount_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11558);
+                _GetNorth_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11773);
+                _SetNorth_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11774);
+                _ContOpenType_Var = NetScriptFramework.Main.GameInfo.GetAddressOf(519396);
+                _ContOpen_Var = NetScriptFramework.Main.GameInfo.GetAddressOf(519421);
+                _CalcCost_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(15757);
+
                 Events.OnMainMenu.Register(e =>
                 {
                     ExcludeForms = CachedFormList.TryParse(Settings.Instance.ExcludeFormIds ?? "", "BetterStealing", "ExcludeFormIds");
@@ -163,18 +171,24 @@ namespace BetterStealing
                     info.OwnerForm = MemoryObject.FromAddress<TESForm>(Memory.ReadPointer(ctx.SP + 0x30));
                 });
 
-                this.InstallHook("send steal alarm #2", 36427, 0x9D3, 7, "48 81 C4 38 01 00 00", ctx =>
+                this.InstallHook("send steal alarm #2", 36427, modern ? 0x9E6 : 0x9D3, 7, "48 81 C4 38 01 00 00", ctx =>
                 {
                     var info = StealInfo.Get();
                     if (info == null)
                         return;
 
-                    info.WasDetected = Memory.ReadUInt8(ctx.SP + 0x40) != 0;
-                    info.State = 1;
+                    // The 1.7 early exit for actors without a process leaves the detection flag uninitialized.
+                    if (modern && (info.Thief == null || info.Thief.Process == null))
+                        info.State = -1;
+                    else
+                    {
+                        info.WasDetected = Memory.ReadUInt8(ctx.SP + 0x40) != 0;
+                        info.State = 1;
+                    }
                     ApplyStolenSoon.Queue(1);
                 });
 
-                this.InstallHook("open container", 50195, 0x20, 5, "E8", ctx =>
+                this.InstallHook("open container", 50195, 0x20, 5, modern ? "E8 EB F0 85 00" : "E8", ctx =>
                 {
                     StealInfo.BeginContainer();
 
@@ -288,21 +302,17 @@ namespace BetterStealing
                     ApplyStolenSoon.Do();
                     ApplyFixCDataSoon.Do();
                 });
-
-                _SetItemOwner_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(15784);
-                _SetListOwner_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11463);
-                _GetCount_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11558);
-                _GetNorth_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11773);
-                _SetNorth_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(11774);
-                _ContOpenType_Var = NetScriptFramework.Main.GameInfo.GetAddressOf(519396);
-                _ContOpen_Var = NetScriptFramework.Main.GameInfo.GetAddressOf(519421);
-                _CalcCost_Func = NetScriptFramework.Main.GameInfo.GetAddressOf(15757);
             }
 
             if (Settings.Instance.FixBadStolenItemCount)
             {
-                var ptr = NetScriptFramework.Main.GameInfo.GetAddressOf(15821, 0x110A, 0, "0F B7 95 A0 01 00 00");
-                Memory.WriteBytes(ptr, new byte[] { 0x8B, 0x54, 0x24, 0x60, 0x90, 0x90, 0x90 }, true);
+                var ptr = NetScriptFramework.Main.GameInfo.GetAddressOf(15821, modern ? 0xFD1 : 0x110A, 0,
+                    modern ? "0F B7 95 B0 01 00 00 48 8B CB E8 10 1D F3 FF" : "0F B7 95 A0 01 00 00");
+
+                // The add-to-container call that follows passes R12D as the transfer count in 1.7.
+                var bytes = modern ? new byte[] { 0x41, 0x8B, 0xD4, 0x90, 0x90, 0x90, 0x90 }
+                    : new byte[] { 0x8B, 0x54, 0x24, 0x60, 0x90, 0x90, 0x90 };
+                Memory.WriteBytes(ptr, bytes, true);
             }
         }
 

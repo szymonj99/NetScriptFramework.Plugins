@@ -68,6 +68,7 @@ namespace CraftingSkill
             Settings = new Settings();
             Settings.Load();
             
+            bool modern = NetScriptFramework.Main.Game.GameVersion[1] >= 7;
             int temperMode = Settings.TemperFormula;
             int smithMode = Settings.SmithFormula;
             int enchantMode = Settings.EnchantFormula;
@@ -76,15 +77,17 @@ namespace CraftingSkill
 
             // Tempering something.
             if(temperMode >= 1 && temperMode <= 3)
-                this.InstallHook(50477, 0x115, 6, "FF 90 B8 07 00 00", _Hook_SmithingTemper);
+                this.InstallHook(50477, modern ? 0x14B : 0x115, 6, "FF 90 B8 07 00 00",
+                    ctx => _Hook_SmithingTemper(ctx, modern));
 
             // Crafting something (creating object).
             if(smithMode >= 1 && smithMode <= 3)
-                this.InstallHook(50476, 0x91, 6, "FF 90 B8 07 00 00", _Hook_SmithingCraft);
+                this.InstallHook(50476, modern ? 0xA0 : 0x91, 6, "FF 90 B8 07 00 00",
+                    ctx => _Hook_SmithingCraft(ctx, modern));
 
             // Enchanting something (creating enchantment).
             if(enchantMode >= 2 && enchantMode <= 3)
-                this.InstallHook(50450, 0x275, 6, "FF 90 B8 07 00 00", _Hook_Enchanting);
+                this.InstallHook(50450, modern ? 0x273 : 0x275, 6, "FF 90 B8 07 00 00", _Hook_Enchanting);
 
             // Disenchanting.
             if (disenchantMode >= 1 && disenchantMode <= 3)
@@ -273,11 +276,12 @@ namespace CraftingSkill
             }
         }
 
-        private static void _Hook_SmithingTemper(CPURegisters ctx)
+        private static void _Hook_SmithingTemper(CPURegisters ctx, bool modern)
         {
+            var temperEntry = modern ? ctx.SI : ctx.BX;
             TESForm item = null;
             {
-                var ptr = Memory.ReadPointer(ctx.BX);
+                var ptr = Memory.ReadPointer(temperEntry);
                 if(ptr != IntPtr.Zero)
                 {
                     ptr = Memory.ReadPointer(ptr);
@@ -292,10 +296,10 @@ namespace CraftingSkill
             if (value < 1.0)
                 value = 1.0;
 
-            float oldQuality = Memory.ReadFloat(ctx.BX + 0x18);
-            float newQuality = Memory.ReadFloat(ctx.BX + 0x1C);
+            float oldQuality = Memory.ReadFloat(temperEntry + 0x18);
+            float newQuality = Memory.ReadFloat(temperEntry + 0x1C);
 
-            var temperForm = MemoryObject.FromAddress<BGSConstructibleObject>(Memory.ReadPointer(ctx.BX + 0x10));
+            var temperForm = MemoryObject.FromAddress<BGSConstructibleObject>(Memory.ReadPointer(temperEntry + 0x10));
             if (temperForm == null)
                 return;
 
@@ -330,9 +334,9 @@ namespace CraftingSkill
             ctx.XMM2f = xp;
         }
 
-        private static void _Hook_SmithingCraft(CPURegisters ctx)
+        private static void _Hook_SmithingCraft(CPURegisters ctx, bool modern)
         {
-            var temperForm = MemoryObject.FromAddress<BGSConstructibleObject>(ctx.SI);
+            var temperForm = MemoryObject.FromAddress<BGSConstructibleObject>(modern ? ctx.BP : ctx.SI);
             if (temperForm == null)
                 return;
 
